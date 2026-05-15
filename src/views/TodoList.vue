@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTodoStore } from '../stores/todoStore';
+import type { Todo } from '../stores/todoStore';
 
 const route = useRoute();
 const store = useTodoStore();
@@ -11,16 +12,22 @@ const editText = ref('');
 
 const filter = computed(() => (route.params.filter as string) || 'all');
 const filteredTodos = computed(() => {
-  switch (filter.value) {
-    case 'completed':
-      return store.todoList.filter(todo => todo.completed);
-    case 'pending':
-      return store.todoList.filter(todo => !todo.completed);
-    case 'important':
-      return store.todoList.filter(todo => /quan trọng|important/i.test(todo.text));
-    default:
-      return store.todoList;
+  const items = store.todoList.slice();
+  const result: Todo[] = [];
+
+  for (const todo of items) {
+    if (filter.value === 'completed' && todo.completed) {
+      result.push(todo);
+    } else if (filter.value === 'pending' && !todo.completed) {
+      result.push(todo);
+    } else if (filter.value === 'important' && /quan trọng|important/i.test(todo.text)) {
+      result.push(todo);
+    } else if (filter.value === 'all') {
+      result.push(todo);
+    }
   }
+
+  return result;
 });
 
 const filterTitle = computed(() => {
@@ -36,7 +43,14 @@ const filterTitle = computed(() => {
   }
 });
 
-const startEdit = (todo: { id: number; text: string }) => {
+const editingTodo = computed(() => {
+  if (editingId.value === null) {
+    return null;
+  }
+  return store.todoList.find(todo => todo.id === editingId.value) || null;
+});
+
+const startEdit = (todo: Todo) => {
   editingId.value = todo.id;
   editText.value = todo.text;
 };
@@ -60,7 +74,8 @@ const handleAddTodo = () => {
   newTask.value = '';
 };
 
-const saveEdit = (id: number) => {
+const saveEdit = (id: number | null) => {
+  if (id === null) return;
   const text = editText.value.trim();
   if (!text) {
     alert('Vui lòng nhập nội dung công việc!');
@@ -92,34 +107,55 @@ const saveEdit = (id: number) => {
         <button @click="handleAddTodo" class="btn-add">Thêm</button>
       </div>
     </div>
+
+    <div v-if="editingTodo" class="modal-overlay">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Chỉnh sửa công việc</h3>
+          <button type="button" class="modal-close" @click="cancelEdit">×</button>
+        </div>
+        <form @submit.prevent="saveEdit(editingId)">
+          <div class="form-row">
+            <label for="editText">Nội dung công việc</label>
+            <input
+              id="editText"
+              v-model="editText"
+              type="text"
+              placeholder="Nhập nội dung sửa..."
+              class="todo-input"
+            />
+          </div>
+
+          <div class="form-row">
+            <label for="todoStatus">Trạng thái</label>
+            <select id="todoStatus" disabled class="todo-input">
+              <option>{{ editingTodo.completed ? 'Đã hoàn thành' : 'Chưa hoàn thành' }}</option>
+            </select>
+          </div>
+
+          <div class="button-group modal-buttons">
+            <button type="submit" class="btn-save">Lưu</button>
+            <button type="button" @click="cancelEdit" class="btn-cancel">Hủy</button>
+          </div>
+        </form>
+      </div>
+    </div>
     
     <div v-if="filteredTodos.length === 0" class="empty-state">
       <p>Không có công việc phù hợp với bộ lọc hiện tại.</p>
     </div>
     
     <ul class="todo-list">
-      <li v-for="todo in filteredTodos" :key="todo.id" class="todo-item">
-        <div v-if="editingId === todo.id" class="edit-mode">
-          <input 
-            v-model="editText" 
-            @keyup.enter="saveEdit(todo.id)" 
-            @keyup.esc="cancelEdit" 
-            class="edit-input"
-            autoFocus
-          />
-          <button type="button" @click="saveEdit(todo.id)" class="btn-save">Lưu</button>
-          <button type="button" @click="cancelEdit" class="btn-cancel">Hủy</button>
-        </div>
-
-        <div v-else class="view-mode">
-          <input type="checkbox" v-model="todo.completed" class="checkbox" />
-          <span :class="{ done: todo.completed }" @dblclick="startEdit(todo)" class="todo-text">{{ todo.text }}</span>
-          <div class="button-group">
-            <router-link :to="`/todo/${todo.id}`" class="btn-view">Xem</router-link>
-            <button @click="startEdit(todo)" class="btn-edit">Sửa</button>
-            <button @click="store.removeTodo(todo.id)" class="btn-delete">Xóa</button>
+      <li v-for="todo in filteredTodos" :key="todo.id" class="todo-item" :class="{ editing: editingId === todo.id }">
+          <div class="view-mode">
+            <input type="checkbox" v-model="todo.completed" class="checkbox" />
+            <span :class="{ done: todo.completed }" class="todo-text">{{ todo.text }}</span>
+            <div class="button-group">
+              <router-link :to="`/todo/${todo.id}`" class="btn-view">Xem</router-link>
+              <button @click="startEdit(todo)" class="btn-edit">Sửa</button>
+              <button @click="store.removeTodo(todo.id)" class="btn-delete">Xóa</button>
+            </div>
           </div>
-        </div>
       </li>
     </ul>
   </div>
@@ -140,6 +176,67 @@ const saveEdit = (id: number) => {
   color: #333;
   margin-bottom: 15px;
   font-size: 24px;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-content {
+  width: 100%;
+  max-width: 520px;
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+  position: relative;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #1f5fa8;
+}
+
+.modal-close {
+  border: none;
+  background: transparent;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  color: #666;
+  padding: 0;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.form-row label {
+  color: #444;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.button-group.modal-buttons {
+  justify-content: flex-end;
 }
 
 .input-group {

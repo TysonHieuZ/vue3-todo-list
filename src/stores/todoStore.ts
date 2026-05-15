@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
-interface Todo {
+export interface Todo {
   id: number;
   text: string;
   completed: boolean;
@@ -12,13 +12,26 @@ export const useTodoStore = defineStore('todo', () => {
   const todoList = ref<Todo[]>([]);
 
   const addTodo = (text: string) => todoList.value.push({ id: Date.now(), text, completed: false });
-  const removeTodo = (id: number) => todoList.value = todoList.value.filter(t => t.id !== id);
-  
+
+  const removeTodo = (id: number) => {
+    const current = todoList.value.slice();
+    const index = current.findIndex(t => t.id === id);
+    if (index !== -1) {
+      current.splice(index, 1);
+      todoList.value = current;
+    }
+  };
+
   const updateTodo = (id: number, newText: string) => {
-    // Cách này cực nhanh và Vue bắt được thay đổi ngay
-    todoList.value = todoList.value.map(t => 
-      t.id === id ? { ...t, text: newText } : t
-    );
+    const current = todoList.value.slice();  // Sử dụng todoList thay vì store
+    const index = current.findIndex(t => t.id === id);
+    if (index !== -1) {
+      const todo = current[index];
+      if (todo) {
+        todo.text = newText;
+        todoList.value = current;
+      }
+    }
   };
 
   return { todoList, addTodo, removeTodo, updateTodo };
