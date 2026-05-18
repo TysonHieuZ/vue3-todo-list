@@ -1,12 +1,12 @@
-import { createApp } from 'vue'
-import { createPinia } from 'pinia' // Phải import cái này
-import App from './App.vue'
-import { router } from './router'
-import './style.css'
+import { createApp } from 'vue';
+import { createPinia } from 'pinia';
+import App from './App.vue';
+import { router } from './router';
+import './style.css';
 
-const app = createApp(App)
-const pinia = createPinia() // Tạo thực thể pinia
+const app = createApp(App);
+const pinia = createPinia();
 
-app.use(pinia) // Kích hoạt pinia TRƯỚC KHI mount
-app.use(router)
-app.mount('#app')
+app.use(pinia);
+app.use(router);
+app.mount('#app');

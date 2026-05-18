@@ -1,16 +1,30 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
+import { usePermissionStore } from '../stores/permissionStore';
 import { useTodoStore } from '../stores/todoStore';
 import type { Todo } from '../stores/todoStore';
 
 const route = useRoute();
 const store = useTodoStore();
+const permissionStore = usePermissionStore();
 const newTask = ref('');
 const editingId = ref<number | null>(null);
 const editText = ref('');
 
 const filter = computed(() => (route.params.filter as string) || 'all');
+const canAddInCurrentFilter = computed(() => ['all', 'important'].includes(filter.value));
+const isCompletedFilter = computed(() => filter.value === 'completed');
+const canCreateTodo = computed(
+  () => permissionStore.currentPermission.canCreate && canAddInCurrentFilter.value
+);
+const canChangeTodo = computed(
+  () => permissionStore.currentPermission.canEdit && !isCompletedFilter.value
+);
+const canDeleteTodo = computed(
+  () => permissionStore.currentPermission.canDelete && !isCompletedFilter.value
+);
+
 const filteredTodos = computed(() => {
   const items = store.todoList.slice();
   const result: Todo[] = [];
@@ -20,7 +34,7 @@ const filteredTodos = computed(() => {
       result.push(todo);
     } else if (filter.value === 'pending' && !todo.completed) {
       result.push(todo);
-    } else if (filter.value === 'important' && /quan trọng|important/i.test(todo.text)) {
+    } else if (filter.value === 'important' && todo.important) {
       result.push(todo);
     } else if (filter.value === 'all') {
       result.push(todo);
@@ -43,14 +57,30 @@ const filterTitle = computed(() => {
   }
 });
 
+const lockedMessage = computed(() => {
+  if (!permissionStore.currentPermission.canCreate) {
+    return 'Quyền hiện tại chỉ được xem, không được thêm công việc mới.';
+  }
+
+  if (!canAddInCurrentFilter.value) {
+    return 'Bộ lọc này chỉ dùng để xem. Hãy thêm công việc ở Tất cả công việc hoặc Việc quan trọng.';
+  }
+
+  return '';
+});
+
 const editingTodo = computed(() => {
   if (editingId.value === null) {
     return null;
   }
-  return store.todoList.find(todo => todo.id === editingId.value) || null;
+  return store.todoList.find((todo) => todo.id === editingId.value) || null;
 });
 
 const startEdit = (todo: Todo) => {
+  if (!canChangeTodo.value) {
+    return;
+  }
+
   editingId.value = todo.id;
   editText.value = todo.text;
 };
@@ -60,51 +90,66 @@ const cancelEdit = () => {
   editText.value = '';
 };
 
-const handleAddTodo = () => {
-  const text = newTask.value.trim();
+const validateTodoText = (text: string) => {
   if (!text) {
     alert('Vui lòng nhập công việc!');
-    return;
+    return false;
   }
+
   if (text.length > 100) {
     alert('Công việc không được vượt quá 100 ký tự!');
+    return false;
+  }
+
+  return true;
+};
+
+const handleAddTodo = () => {
+  if (!canCreateTodo.value) {
     return;
   }
-  store.addTodo(text);
+
+  const text = newTask.value.trim();
+  if (!validateTodoText(text)) {
+    return;
+  }
+
+  store.addTodo(text, filter.value === 'important');
   newTask.value = '';
 };
 
 const saveEdit = (id: number | null) => {
-  if (id === null) return;
+  if (id === null || !canChangeTodo.value) return;
+
   const text = editText.value.trim();
-  if (!text) {
-    alert('Vui lòng nhập nội dung công việc!');
+  if (!validateTodoText(text)) {
     return;
   }
-  if (text.length > 100) {
-    alert('Công việc không được vượt quá 100 ký tự!');
-    return;
-  }
+
   store.updateTodo(id, text);
   editingId.value = null;
   editText.value = '';
 };
-
 </script>
 
 <template>
   <div class="todo-container">
     <div class="add-todo-section">
       <h2>{{ filterTitle }}</h2>
-      <div class="input-group">
-        <input 
-          v-model="newTask" 
+
+      <div v-if="canCreateTodo" class="input-group">
+        <input
+          v-model="newTask"
           @keyup.enter="handleAddTodo"
           type="text"
           placeholder="Nhập công việc mới..."
           class="todo-input"
         />
         <button @click="handleAddTodo" class="btn-add">Thêm</button>
+      </div>
+
+      <div v-else class="locked-state">
+        {{ lockedMessage }}
       </div>
     </div>
 
@@ -140,22 +185,47 @@ const saveEdit = (id: number | null) => {
         </form>
       </div>
     </div>
-    
+
     <div v-if="filteredTodos.length === 0" class="empty-state">
       <p>Không có công việc phù hợp với bộ lọc hiện tại.</p>
     </div>
-    
+
     <ul class="todo-list">
-      <li v-for="todo in filteredTodos" :key="todo.id" class="todo-item" :class="{ editing: editingId === todo.id }">
-          <div class="view-mode">
-            <input type="checkbox" v-model="todo.completed" class="checkbox" />
-            <span :class="{ done: todo.completed }" class="todo-text">{{ todo.text }}</span>
-            <div class="button-group">
-              <router-link :to="`/todo/${todo.id}`" class="btn-view">Xem</router-link>
-              <button @click="startEdit(todo)" class="btn-edit">Sửa</button>
-              <button @click="store.removeTodo(todo.id)" class="btn-delete">Xóa</button>
-            </div>
+      <li
+        v-for="todo in filteredTodos"
+        :key="todo.id"
+        class="todo-item"
+        :class="{ readonly: isCompletedFilter }"
+      >
+        <div class="view-mode">
+          <input
+            type="checkbox"
+            v-model="todo.completed"
+            class="checkbox"
+            :disabled="!canChangeTodo"
+          />
+          <span :class="{ done: todo.completed }" class="todo-text">{{ todo.text }}</span>
+          <span v-if="todo.important" class="important-badge">Quan trọng</span>
+
+          <div class="button-group">
+            <router-link
+              v-if="permissionStore.currentPermission.canViewDetail"
+              :to="`/todo/${todo.id}`"
+              class="btn-view"
+            >
+              Xem
+            </router-link>
+            <span v-else class="permission-note">Ẩn chi tiết</span>
+
+            <button v-if="canChangeTodo" @click="startEdit(todo)" class="btn-edit">Sửa</button>
+            <span v-else class="permission-note">Chỉ xem</span>
+
+            <button v-if="canDeleteTodo" @click="store.removeTodo(todo.id)" class="btn-delete">
+              Xóa
+            </button>
+            <span v-else class="permission-note">Không xóa</span>
           </div>
+        </div>
       </li>
     </ul>
   </div>
@@ -163,7 +233,7 @@ const saveEdit = (id: number | null) => {
 
 <style scoped>
 .todo-container {
-  max-width: 600px;
+  max-width: 760px;
   margin: 0 auto;
   padding: 20px;
 }
@@ -176,6 +246,15 @@ const saveEdit = (id: number | null) => {
   color: #333;
   margin-bottom: 15px;
   font-size: 24px;
+}
+
+.locked-state {
+  padding: 14px 16px;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  background: #f6f9fc;
+  color: #56677a;
+  font-weight: 600;
 }
 
 .modal-overlay {
@@ -193,7 +272,7 @@ const saveEdit = (id: number | null) => {
   width: 100%;
   max-width: 520px;
   background: #ffffff;
-  border-radius: 18px;
+  border-radius: 8px;
   padding: 24px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
   position: relative;
@@ -256,13 +335,13 @@ const saveEdit = (id: number | null) => {
 
 .todo-input:focus {
   outline: none;
-  border-color: #4CAF50;
+  border-color: #4caf50;
   box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
 }
 
 .btn-add {
   padding: 12px 25px;
-  background: #4CAF50;
+  background: #4caf50;
   color: white;
   border: none;
   border-radius: 8px;
@@ -301,24 +380,14 @@ const saveEdit = (id: number | null) => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.edit-mode,
+.todo-item.readonly {
+  background: #fbfcfe;
+}
+
 .view-mode {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.edit-input {
-  flex: 1;
-  padding: 10px 12px;
-  border: 2px solid #2196F3;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.edit-input:focus {
-  outline: none;
-  box-shadow: 0 0 5px rgba(33, 150, 243, 0.3);
 }
 
 .checkbox {
@@ -326,6 +395,10 @@ const saveEdit = (id: number | null) => {
   height: 20px;
   cursor: pointer;
   margin-right: 10px;
+}
+
+.checkbox:disabled {
+  cursor: not-allowed;
 }
 
 .todo-text {
@@ -345,10 +418,33 @@ const saveEdit = (id: number | null) => {
   color: #999;
 }
 
+.important-badge,
+.permission-note {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.important-badge {
+  background: #fff4d6;
+  color: #8a5b00;
+}
+
+.permission-note {
+  background: #eef2f7;
+  color: #6a7584;
+}
+
 .button-group {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .btn-save,
@@ -369,7 +465,7 @@ const saveEdit = (id: number | null) => {
 }
 
 .btn-save {
-  background: #4CAF50;
+  background: #4caf50;
   color: white;
 }
 
@@ -387,7 +483,7 @@ const saveEdit = (id: number | null) => {
 }
 
 .btn-view {
-  background: #2196F3;
+  background: #2196f3;
   color: white;
 }
 
@@ -396,7 +492,7 @@ const saveEdit = (id: number | null) => {
 }
 
 .btn-edit {
-  background: #FF9800;
+  background: #ff9800;
   color: white;
 }
 
